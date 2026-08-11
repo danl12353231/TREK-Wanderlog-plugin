@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wanderlog Import</title>
+<!-- trek:ui -->
+<style>
+  body { background: transparent; }
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 40px 24px 24px;
+  }
+
+  /* ---------- header ---------- */
+  .head { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }
+  .head-ico {
+    flex: none;
+    width: 52px; height: 52px;
+    border-radius: 16px;
+    display: grid; place-items: center;
+    background: color-mix(in oklch, var(--accent) 12%, transparent);
+    color: var(--accent);
+  }
+  .head-ico svg { width: 28px; height: 28px; }
+  h1 { font-size: 21px; font-weight: 700; margin: 0 0 4px; letter-spacing: -.01em; }
+  .sub { margin: 0; color: var(--text-muted); font-size: 13.5px; line-height: 1.55; }
+  .sub b { color: var(--text-primary); }
+
+  /* ---------- form ---------- */
+  .form-row { display: flex; gap: 10px; align-items: flex-end; }
+  .field { flex: 1; min-width: 0; }
+  .form-row .trek-btn { height: 40px; padding: 0 20px; flex: none; }
+  .hint { margin: 10px 2px 0; font-size: 12px; color: var(--text-faint); line-height: 1.5; }
+
+  /* ---------- panels ---------- */
+  .panel { display: none; margin-top: 22px; }
+  .panel.visible { display: block; animation: trek-menu-enter .22s var(--trek-ease); }
+
+  .prog-top { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px; }
+  .spinner {
+    flex: none; width: 26px; height: 26px; margin-top: 2px;
+    border-radius: 50%;
+    border: 3px solid color-mix(in oklch, var(--accent) 18%, transparent);
+    border-top-color: var(--accent);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .p-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+  .p-sub { margin-top: 2px; font-size: 13px; color: var(--text-muted); min-height: 18px; }
+  .p-sub.cur { color: var(--accent); font-weight: 500; }
+
+  .bar {
+    height: 8px; border-radius: 999px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-faint);
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%; width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), color-mix(in oklch, var(--accent) 55%, transparent));
+    transition: width .35s var(--trek-ease);
+  }
+  .bar-row { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+  .bar-pct { font-size: 12px; font-weight: 700; color: var(--accent); }
+  .bar-lbl { font-size: 12px; color: var(--text-faint); }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 18px;
+  }
+  .stat {
+    background: var(--bg-card);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    padding: 12px 10px;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+  }
+  .stat-ico { font-size: 17px; line-height: 1; display: block; }
+  .stat-n { display: block; margin-top: 7px; font-size: 17px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .stat-n small { font-size: 12px; font-weight: 500; color: var(--text-faint); }
+  .stat-l { display: block; margin-top: 1px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-faint); }
+
+  /* ---------- done / error ---------- */
+  .outcome { text-align: center; padding: 8px 0 2px; }
+  .outcome-badge {
+    width: 52px; height: 52px; margin: 0 auto 12px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    font-size: 24px; font-weight: 800;
+  }
+  .outcome-ok .outcome-badge { background: var(--success-soft); color: var(--success); }
+  .outcome-err .outcome-badge { background: var(--danger-soft); color: var(--danger); }
+  .outcome-title { font-size: 17px; font-weight: 700; }
+  .outcome-msg { margin-top: 4px; font-size: 13px; color: var(--text-muted); }
+  ul.done-list { list-style: none; margin: 16px auto 0; padding: 0; max-width: 340px; text-align: left; }
+  ul.done-list li {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; margin: 6px 0;
+    background: var(--bg-card); border: 1px solid var(--border-primary);
+    border-radius: 12px; font-size: 13.5px; color: var(--text-primary);
+  }
+  ul.done-list .li-ico { font-size: 15px; }
+  ul.done-list .li-n { margin-left: auto; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .err-msg {
+    margin: 14px auto 0; max-width: 420px;
+    background: var(--danger-soft); color: var(--danger);
+    border-radius: 12px; padding: 12px 14px;
+    font-size: 13px; text-align: left; word-break: break-word;
+  }
+  .actions { display: flex; justify-content: center; gap: 10px; margin-top: 18px; }
+
+  @media (max-width: 460px) {
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+    .wrap { padding: 24px 16px 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="trek-glass">
+
+    <!-- header -->
+    <div class="head">
+      <div class="head-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Import from Wanderlog</h1>
+        <p class="sub">Paste a Wanderlog trip link and this plugin recreates it in TREK — <b>days, places, notes, flights and hotels</b>, all with live progress.</p>
+      </div>
+    </div>
+
+    <!-- form -->
+    <div class="form-row">
+      <div class="field">
+        <label class="trek-label" for="url">Wanderlog trip URL or key</label>
+        <input id="url" class="trek-input" type="text" spellcheck="false" autocomplete="off"
+               placeholder="https://wanderlog.com/plan/abc123xyz/my-trip/shared  or  abc123xyz"
+               onkeydown="if(event.key==='Enter')doImport()">
+      </div>
+      <button id="go" class="trek-btn trek-btn--primary" onclick="doImport()">Import</button>
+    </div>
+    <p class="hint">The trip must be <b>public or shared</b> (open it in Wanderlog → Share → copy the link). Private trips can't be fetched anonymously.</p>
+
+    <!-- progress -->
+    <div id="panel-progress" class="panel">
+      <div class="prog-top">
+        <div class="spinner"></div>
+        <div style="flex:1;min-width:0">
+          <div id="p-title" class="p-title">Starting import…</div>
+          <div id="p-sub" class="p-sub">Connecting to Wanderlog…</div>
+        </div>
+      </div>
+      <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
+      <div class="bar-row">
+        <span id="bar-lbl" class="bar-lbl">Waiting…</span>
+        <span id="bar-pct" class="bar-pct">0%</span>
+      </div>
+      <div class="stat-grid">
+        <div class="stat"><span class="stat-ico">🗓️</span><span class="stat-n" id="s-sections">0/0</span><span class="stat-l">Days</span></div>
+        <div class="stat"><span class="stat-ico">📍</span><span class="stat-n" id="s-places">0/0</span><span class="stat-l">Places</span></div>
+        <div class="stat"><span class="stat-ico">📝</span><span class="stat-n" id="s-notes">0/0</span><span class="stat-l">Notes</span></div>
+        <div class="stat"><span class="stat-ico">✈️</span><span class="stat-n" id="s-flights">0/0</span><span class="stat-l">Flights</span></div>
+      </div>
+    </div>
+
+    <!-- done -->
+    <div id="panel-done" class="panel outcome outcome-ok">
+      <div class="outcome-badge">✓</div>
+      <div id="done-title" class="outcome-title">Trip created</div>
+      <div id="done-msg" class="outcome-msg"></div>
+      <ul id="done-list" class="done-list"></ul>
+      <div class="actions">
+        <button id="btn-open" class="trek-btn trek-btn--primary" onclick="openTrip()">Open trip</button>
+        <button class="trek-btn trek-btn--secondary" onclick="reset()">Import another</button>
+      </div>
+    </div>
+
+    <!-- error -->
+    <div id="panel-error" class="panel outcome outcome-err">
+      <div class="outcome-badge">✕</div>
+      <div class="outcome-title">Import failed</div>
+      <div id="err-msg" class="err-msg"></div>
+      <div class="actions">
+        <button class="trek-btn trek-btn--secondary" onclick="reset()">Try again</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var input = document.getElementById('url');
+  var btn = document.getElementById('go');
+  var pollTimer = null;
+  var jobId = null;
+  var tripId = null;
+  var importing = false;
+
+  var panel = function (id) { return document.getElementById(id); };
+  function show(id) {
+    ['panel-progress', 'panel-done', 'panel-error'].forEach(function (p) {
+      panel(p).classList.toggle('visible', p === id);
+    });
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function setBar(frac) {
+    frac = Math.max(0, Math.min(1, frac || 0));
+    panel('bar-fill').style.width = (frac * 100).toFixed(1) + '%';
+    panel('bar-pct').textContent = Math.round(frac * 100) + '%';
+  }
+
+  function renderProgress(job) {
+    if (!job) { // job row not created yet — import hasn't started writing
+      panel('p-title').textContent = 'Starting import…';
+      panel('p-sub').textContent = 'Connecting to Wanderlog…';
+      panel('p-sub').classList.remove('cur');
+      setBar(0);
+      return;
+    }
+    var tS = job.total_sections || 0, dS = job.sections_done || 0;
+    var tP = job.total_places || 0, dP = job.places_done || 0;
+    var tN = job.total_notes || 0, dN = job.notes_done || 0;
+    var tF = job.total_flights || 0, dF = job.flights_done || 0;
+
+    panel('s-sections').innerHTML = dS + '/' + tS;
+    panel('s-places').innerHTML = dP + '/' + tP;
+    panel('s-notes').innerHTML = dN + '/' + tN;
+    panel('s-flights').innerHTML = dF + '/' + tF;
+
+    var done = dP + dN + dF;
+    var total = tP + tN + tF;
+    var frac = total > 0 ? done / total : (tS > 0 ? dS / tS : 0);
+    setBar(frac);
+    panel('bar-lbl').textContent = job.message || job.step || 'Importing…';
+
+    if (job.current_section) {
+      panel('p-sub').textContent = job.current_section;
+      panel('p-sub').classList.add('cur');
+    } else {
+      panel('p-sub').classList.remove('cur');
+      panel('p-sub').textContent = job.message || '';
+    }
+    panel('p-title').textContent = job.step === 'fetch' ? 'Fetching trip…'
+      : job.step === 'create' ? 'Creating trip…'
+      : job.step === 'itinerary' ? 'Building the day plan…'
+      : job.step === 'flights' ? 'Importing flights…'
+      : 'Importing…';
+  }
+
+  // Render progress from a /continue response ({ counts, totals }).
+  function renderContinue(r) {
+    var c = r.counts || {}, t = r.totals || {};
+    panel('s-sections').innerHTML = (c.sections || 0) + '/' + (t.sections || 0);
+    panel('s-places').innerHTML = (c.places || 0) + '/' + (t.places || 0);
+    panel('s-notes').innerHTML = (c.notes || 0) + '/' + (t.notes || 0);
+    panel('s-flights').innerHTML = (c.flights || 0) + '/' + (t.flights || 0);
+    var done = (c.places || 0) + (c.notes || 0) + (c.flights || 0);
+    var total = (t.places || 0) + (t.notes || 0) + (t.flights || 0);
+    setBar(total > 0 ? done / total : ((t.sections || 0) > 0 ? (c.sections || 0) / t.sections : 0));
+    panel('bar-lbl').textContent = 'Importing…';
+    panel('p-title').textContent = 'Importing…';
+  }
+
+  function pollProgress() {
+    if (!importing || !jobId) return;
+    window.trek.invoke('/progress?job=' + encodeURIComponent(jobId), { method: 'GET' })
+      .then(function (d) {
+        if (d && d.ok) renderProgress(d.job);
+      })
+      .catch(function () { /* transient poll failure — ignore */ });
+  }
+
+  function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+  // Repeatedly POST /continue (each call is bounded and well under the 8s client
+  // timeout) until the import reports done.
+  function runContinue() {
+    if (!importing) return;
+    window.trek.invoke('/continue', { method: 'POST', body: { job: jobId } })
+      .then(function (r) {
+        if (!r || !r.ok) {
+          renderError((r && r.message) || 'Unknown error.');
+          show('panel-error');
+          importing = false;
+          btn.disabled = false;
+          btn.textContent = 'Import';
+          return;
+        }
+        renderContinue(r);
+        if (r.done) {
+          renderDone(r);
+          show('panel-done');
+          window.trek.notify('success', 'Trip imported successfully');
+          importing = false;
+          btn.disabled = false;
+          btn.textContent = 'Import';
+        } else {
+          setTimeout(runContinue, 120);
+        }
+      })
+      .catch(function (err) {
+        renderError((err && err.message) || 'Unknown error.');
+        show('panel-error');
+        importing = false;
+        btn.disabled = false;
+        btn.textContent = 'Import';
+      });
+  }
+
+  function renderDone(data) {
+    var c = data.counts || {};
+    var rows = [];
+    if (c.sections) rows.push(['🗓️', 'Itinerary days', c.sections]);
+    if (c.places) rows.push(['📍', 'Places', c.places]);
+    if (c.notes) rows.push(['📝', 'Notes', c.notes]);
+    if (c.hotels) rows.push(['🏨', 'Hotel stays', c.hotels]);
+    if (c.flights) rows.push(['✈️', 'Flights', c.flights]);
+    if (!rows.length) rows.push(['📍', 'Nothing to import', 0]);
+    panel('done-list').innerHTML = rows.map(function (r) {
+      return '<li><span class="li-ico">' + r[0] + '</span>' + esc(r[1]) + '<span class="li-n">' + r[2] + '</span></li>';
+    }).join('');
+    if (c.skipped > 0) {
+      panel('done-msg').textContent = c.skipped + ' unsupported block(s) skipped (e.g. transport).';
+    } else {
+      panel('done-msg').textContent = '';
+    }
+    if (data.duplicate) {
+      panel('done-title').textContent = 'Already imported';
+      panel('done-msg').textContent = 'This Wanderlog trip was imported before.';
+    }
+    tripId = data.tripId;
+  }
+
+  function renderError(message) {
+    panel('err-msg').textContent = message || 'Unknown error.';
+  }
+
+  window.doImport = function () {
+    var url = input.value.trim();
+    if (!url || importing) return;
+    importing = true;
+    btn.disabled = true;
+    btn.textContent = 'Importing…';
+
+    jobId = 'imp_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+    tripId = null;
+    show('panel-progress');
+    renderProgress(null);
+    pollTimer = setInterval(pollProgress, 700);
+
+    window.trek.invoke('/import', { method: 'POST', body: { url: url, job: jobId } })
+      .then(function (data) {
+        stopPolling();
+        if (!data || !data.ok) {
+          renderError((data && data.message) || 'Unknown error.');
+          show('panel-error');
+          importing = false;
+          btn.disabled = false;
+          btn.textContent = 'Import';
+          return;
+        }
+        if (data.duplicate) {
+          renderDone(data);
+          show('panel-done');
+          window.trek.notify('info', 'Trip already imported');
+          importing = false;
+          btn.disabled = false;
+          btn.textContent = 'Import';
+          return;
+        }
+        // Trip created (or an interrupted run resumed) — use the server's job id
+        // and start the resumable chunk loop.
+        jobId = data.jobId || jobId;
+        renderContinue({ counts: { sections: 0, places: 0, notes: 0, flights: 0 }, totals: data.totals });
+        runContinue();
+      })
+      .catch(function (err) {
+        stopPolling();
+        renderError((err && err.message) || 'Unknown error.');
+        show('panel-error');
+        importing = false;
+        btn.disabled = false;
+        btn.textContent = 'Import';
+      });
+  };
+
+  window.openTrip = function () {
+    if (tripId) window.trek.navigate('/trips/' + tripId);
+  };
+
+  window.reset = function () {
+    stopPolling();
+    importing = false;
+    jobId = null;
+    tripId = null;
+    input.value = '';
+    ['panel-progress', 'panel-done', 'panel-error'].forEach(function (p) { panel(p).classList.remove('visible'); });
+    setBar(0);
+    btn.disabled = false;
+    btn.textContent = 'Import';
+    input.focus();
+  };
+})();
+</script>
+</body>
+</html>
