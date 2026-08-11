@@ -35,7 +35,9 @@ returns the previously created trip instead of duplicating it.
 
 ## Screenshots
 
-![Wanderlog Import page](docs/screenshot.png)
+<img width="3010" height="744" alt="image" src="https://github.com/user-attachments/assets/ccbd1788-f1c0-4fea-9808-25bd381b8406" />
+<img width="1411" height="583" alt="image" src="https://github.com/user-attachments/assets/b75aebd0-10a3-4c39-b648-bcca92c34a4e" />
+
 
 ## Setup
 
