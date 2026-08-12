@@ -5,7 +5,7 @@
   "apiVersion": 1,
   "author": "lahlafi",
   "description": "Import a trip from Wanderlog into TREK by pasting its view URL — recreates days, places, notes, flights, and hotel stays.",
-  "homepage": "https://github.com/daniel-lahlafi/TREK-Wanderlog-plugin",
+  "homepage": "https://github.com/danl12353231/TREK-Wanderlog-plugin",
   "license": "MIT",
   "icon": "Plane",
   "type": "page",
