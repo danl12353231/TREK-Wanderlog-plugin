@@ -80,6 +80,7 @@ returns the previously created trip instead of duplicating it.
 | `db:read:trips` | map days by date after trip creation |
 | `db:read:categories` | best-effort place category mapping |
 | `db:own` | store a key→trip mapping for de-duplication |
+| `db:meta` | create and migrate the plugin's own progress-tracking tables (`imports`, `jobs`) |
 
 ## Development
 
