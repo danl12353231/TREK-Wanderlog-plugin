@@ -33,6 +33,12 @@ unknown or missing fields are skipped rather than failing the whole import, and
 a summary of what was imported is shown after each run. Re-importing the same key
 returns the previously created trip instead of duplicating it.
 
+## Compatibility
+
+Supports TREK **3.4.0+**, including the 4.x line (manifest `"trek": ">=3.4.0 <5.0.0"`).
+No host code or client bridge changes were needed for 4.x — the plugin uses the
+stable `ctx` RPC surface, `definePlugin` routes and the `window.trek` frame bridge.
+
 ## Screenshots
 
 <img width="3010" height="744" alt="image" src="https://github.com/user-attachments/assets/ccbd1788-f1c0-4fea-9808-25bd381b8406" />

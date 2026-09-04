@@ -28,10 +28,12 @@
 const { definePlugin } = require('trek-plugin-sdk');
 
 const API_BASE = 'https://wanderlog.com/api/tripPlans';
-// How many ctx.* RPCs one /continue call may issue. Small enough that even with
-// an empty shared rate-limit bucket a chunk stays well under the client's 8s
-// timeout (35 calls at 14/sec ≈ 2.5s worst case).
-const CHUNK_BUDGET = 35;
+// How many ctx.* RPCs one /continue call may issue. The TREK web client aborts a
+// plugin route call at 8s (axios), and the host forwards our handler's full run to
+// that client — so a chunk must finish comfortably inside the window. Budget 18
+// keeps a request to a few seconds even from an empty shared rate-limit bucket
+// (~24 tokens incl. per-block bookkeeping at 14/sec ≈ 1.7s + RPC latency).
+const CHUNK_BUDGET = 18;
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -166,6 +168,21 @@ function throttleCtx(ctx) {
 
 function genJobId() {
   return `imp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// In-process guard so two overlapping requests (a browser that timed out and
+// retried while the first request is still finishing) never process the same
+// cursor chunk twice. All route handlers for one plugin run in the same child
+// process, so a Set is a safe lock; the job DB cursor is what makes a dropped
+// response resumable without duplicating work.
+const ACTIVE_JOBS = new Set();
+
+function busyBody(jobId) {
+  return {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ok: true, jobId: String(jobId), busy: true }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -630,6 +647,8 @@ module.exports = definePlugin({
           return fail(400, 'Paste a Wanderlog view/plan URL or a trip key (e.g. https://wanderlog.com/plan/abc123xyz/my-trip/shared).');
         }
         const jobId = String(input.job || genJobId());
+        if (ACTIVE_JOBS.has(jobId)) return busyBody(jobId);
+        ACTIVE_JOBS.add(jobId);
         try {
           const result = await startImport(ctx, key, jobId);
           return { status: 200, headers: json, body: JSON.stringify({ ok: true, jobId, ...result }) };
@@ -637,6 +656,8 @@ module.exports = definePlugin({
           ctx.log.warn(`wanderlog import failed for ${key}: ${e.message}`);
           await updateJob(ctx, jobId, { status: 'error', step: 'error', message: e.message, error: String(e.message) }).catch(() => {});
           return fail(422, e.message);
+        } finally {
+          ACTIVE_JOBS.delete(jobId);
         }
       },
     },
@@ -650,12 +671,16 @@ module.exports = definePlugin({
         const input = (req.body && typeof req.body === 'object' ? req.body : {}) || {};
         const jobId = String(input.job || '');
         if (!jobId) return fail(400, 'job is required');
+        if (ACTIVE_JOBS.has(jobId)) return busyBody(jobId);
+        ACTIVE_JOBS.add(jobId);
         try {
           const result = await continueImport(ctx, jobId);
           return { status: 200, headers: json, body: JSON.stringify({ ok: true, ...result }) };
         } catch (e) {
           ctx.log.warn(`wanderlog import continue failed (${jobId}): ${e.message}`);
           return fail(422, e.message);
+        } finally {
+          ACTIVE_JOBS.delete(jobId);
         }
       },
     },

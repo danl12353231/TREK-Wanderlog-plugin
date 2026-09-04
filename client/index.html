@@ -288,39 +288,66 @@
 
   function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
-  // Repeatedly POST /continue (each call is bounded and well under the 8s client
-  // timeout) until the import reports done.
-  function runContinue() {
+  // Repeatedly POST /continue (each call is bounded to stay under the client's 8s
+  // timeout) until the import reports done. The host forwards each call through the
+  // app's axios client, which aborts at 8000ms — but the SERVER keeps running the
+  // chunk to completion and persists its cursor after every block, so a timeout is
+  // never fatal: the next /continue simply resumes where the last chunk stopped.
+  // `busy` responses (a previous request is still finishing in the plugin process)
+  // are waited out too. /progress keeps polling throughout so the UI stays live.
+  function runContinue(tries) {
     if (!importing) return;
     window.trek.invoke('/continue', { method: 'POST', body: { job: jobId } })
       .then(function (r) {
-        if (!r || !r.ok) {
-          renderError((r && r.message) || 'Unknown error.');
-          show('panel-error');
-          importing = false;
-          btn.disabled = false;
-          btn.textContent = 'Import';
-          return;
-        }
+        if (!r || !r.ok) { failImport((r && r.message) || 'Unknown error.'); return; }
+        if (r.busy) { setTimeout(function () { runContinue(tries); }, 350); return; }
         renderContinue(r);
         if (r.done) {
-          renderDone(r);
-          show('panel-done');
-          window.trek.notify('success', 'Trip imported successfully');
-          importing = false;
-          btn.disabled = false;
-          btn.textContent = 'Import';
+          finishImport(r);
         } else {
-          setTimeout(runContinue, 120);
+          setTimeout(function () { runContinue(0); }, 120);
         }
       })
       .catch(function (err) {
-        renderError((err && err.message) || 'Unknown error.');
-        show('panel-error');
-        importing = false;
-        btn.disabled = false;
-        btn.textContent = 'Import';
+        if (!importing) return;
+        var msg = errMsg(err);
+        if (isTimeoutError(err)) {
+          if (tries < 30) {
+            panel('p-sub').textContent = 'Server still working — retrying…';
+            setTimeout(function () { runContinue(tries + 1); }, 700);
+            return;
+          }
+          failImport('Timed out repeatedly. The import is still running server-side — wait a few seconds, then press Import again to resume it. (' + msg + ')');
+          return;
+        }
+        failImport(msg);
       });
+  }
+
+  function isTimeoutError(err) {
+    var msg = String((err && err.message) || '').toLowerCase();
+    return msg.indexOf('timeout') !== -1 || msg.indexOf('econnaborted') !== -1 || msg.indexOf('aborted') !== -1;
+  }
+
+  function errMsg(err) { return (err && err.message) || 'Unknown error.'; }
+
+  function failImport(message) {
+    stopPolling();
+    renderError(message);
+    show('panel-error');
+    importing = false;
+    btn.disabled = false;
+    btn.textContent = 'Import';
+  }
+
+  function finishImport(data) {
+    stopPolling();
+    renderDone(data);
+    show('panel-done');
+    window.trek.notify('success', 'Trip imported successfully');
+    importing = false;
+    btn.disabled = false;
+    btn.textContent = 'Import';
   }
 
   function renderDone(data) {
@@ -364,18 +391,20 @@
     renderProgress(null);
     pollTimer = setInterval(pollProgress, 700);
 
+    sendImport(url, 0);
+  };
+
+  // POST /import once. Retried on the host's 8s timeout and on `busy`: the request
+  // keeps running server-side and creating the job/trip is idempotent + resumable,
+  // so a retry with the same job id simply returns the job that is already there.
+  function sendImport(url, tries) {
+    if (!importing) return;
     window.trek.invoke('/import', { method: 'POST', body: { url: url, job: jobId } })
       .then(function (data) {
-        stopPolling();
-        if (!data || !data.ok) {
-          renderError((data && data.message) || 'Unknown error.');
-          show('panel-error');
-          importing = false;
-          btn.disabled = false;
-          btn.textContent = 'Import';
-          return;
-        }
+        if (!data || !data.ok) { failImport((data && data.message) || 'Unknown error.'); return; }
+        if (data.busy) { setTimeout(function () { sendImport(url, tries); }, 350); return; }
         if (data.duplicate) {
+          stopPolling();
           renderDone(data);
           show('panel-done');
           window.trek.notify('info', 'Trip already imported');
@@ -385,20 +414,22 @@
           return;
         }
         // Trip created (or an interrupted run resumed) — use the server's job id
-        // and start the resumable chunk loop.
+        // and start the resumable chunk loop. /progress keeps polling meanwhile.
         jobId = data.jobId || jobId;
-        renderContinue({ counts: { sections: 0, places: 0, notes: 0, flights: 0 }, totals: data.totals });
-        runContinue();
+        renderContinue({ counts: { sections: 0, places: 0, notes: 0, flights: 0 }, totals: data.totals || {} });
+        runContinue(0);
       })
       .catch(function (err) {
-        stopPolling();
-        renderError((err && err.message) || 'Unknown error.');
-        show('panel-error');
-        importing = false;
-        btn.disabled = false;
-        btn.textContent = 'Import';
+        if (!importing) return;
+        var msg = errMsg(err);
+        if (isTimeoutError(err) && tries < 8) {
+          panel('p-sub').textContent = 'Server still working — retrying…';
+          setTimeout(function () { sendImport(url, tries + 1); }, 900);
+          return;
+        }
+        failImport(msg);
       });
-  };
+  }
 
   window.openTrip = function () {
     if (tripId) window.trek.navigate('/trips/' + tripId);
