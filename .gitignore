@@ -1,2 +1,6 @@
 # Build artifact produced by `trek-plugin-sdk pack`
 plugin.zip
+
+# Local dev / test scaffolding
+node_modules/
+*.tgz
