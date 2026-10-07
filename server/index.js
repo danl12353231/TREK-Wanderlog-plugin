@@ -67,6 +67,23 @@ function isHotelSection(heading) {
   return /hotel|stay|lodging|accommodat|where to stay|unterkunft/i.test(heading || '');
 }
 
+// A Wanderlog "section" becomes a TREK day ONLY when it is a dated day of the
+// itinerary. The "Overview" tab items ("Places to visit", "Todo", "Notes",
+// "Hotels and lodging", "Transit", …) are undated list sections — Wanderlog
+// marks them mode:"placeList" with date:null, versus mode:"dayPlan" + a real
+// date for actual days. Treating those Overview sections as days was the bug
+// that created phantom extra days (issue #1); their contents belong in TREK's
+// *unplanned* bucket instead.
+function isDaySection(section) {
+  if (!section) return false;
+  const hasDate = !!normDate(section.date);
+  if (section.mode === 'dayPlan') return hasDate;
+  if (section.mode === 'placeList') return false;
+  // Unknown/absent mode (schema drift): fall back to the date — a real
+  // itinerary day always carries one; Overview sections never do.
+  return hasDate;
+}
+
 function categoryNameFor(placeTypes, heading) {
   const t = (Array.isArray(placeTypes) ? placeTypes : []).join(' ').toLowerCase();
   const h = (heading || '').toLowerCase();
@@ -280,7 +297,12 @@ async function importPlace(ctx, tripId, section, block, daysByDate, catByName, d
 
   const place = await ctx.places.create(tripId, placeInput);
   const placeId = Number(place.id);
-  await ctx.itinerary.assign(tripId, dayId, placeId, placeInput.notes || null);
+  // dayId == null → an "unplanned" place: it belongs to the trip but is not
+  // pinned to any day. TREK models that as a place with no itinerary
+  // assignment, so we simply skip assign() (its dayId is non-nullable).
+  if (dayId != null) {
+    await ctx.itinerary.assign(tripId, dayId, placeId, placeInput.notes || null);
+  }
 
   const isHotel = block.hotel || isHotelSection(section.heading);
   if (isHotel) {
@@ -345,7 +367,8 @@ async function processBlock(ctx, jobId, tripId, section, block, daysByDate, catB
   }
 
   if (btype === 'place') {
-    let calls = 3;
+    // places.create (+ itinerary.assign only when the place lands on a day).
+    let calls = dayId != null ? 3 : 2;
     const ok = await importPlace(ctx, tripId, section, block, daysByDate, catByName, dayId, start, end);
     if (!ok) { counts.skipped++; return 1; }
     counts.places++;
@@ -359,6 +382,9 @@ async function processBlock(ctx, jobId, tripId, section, block, daysByDate, catB
   if (btype === 'note') {
     const text = textOf(block.text);
     if (!text) { counts.skipped++; return 1; }
+    // A day note needs a day. Overview-tab ("unplanned") notes have none, and
+    // TREK has no trip-level note surface — so skip rather than invent a day.
+    if (dayId == null) { counts.skipped++; return 1; }
     try {
       await ctx.daynotes.create(tripId, dayId, { text });
       counts.notes++;
@@ -500,8 +526,13 @@ async function continueImport(rawCtx, jobId) {
     const nonFlight = blocks.filter((b) => b.type !== 'flight');
     const isFlightsOnly = flightBlocks.length > 0 && nonFlight.length === 0;
 
-    // First block of a normal section: ensure its day exists.
-    if (cursor.blockIndex === 0 && !isFlightsOnly) {
+    // Does this section become a real TREK day? Only dated day-plan sections do.
+    // Everything else (the undated "Overview" list sections, and flights-only
+    // sections) imports into the trip without a day — issue #1.
+    const needsDay = !isFlightsOnly && isDaySection(section);
+
+    // First block of a day section: ensure its day exists.
+    if (cursor.blockIndex === 0 && needsDay) {
       const label = String(section.heading || '').trim() || (section.date ? `Day ${counts.sections + 1}` : '');
       await updateJob(ctx, jobId, {
         current_section: label || `Day ${counts.sections + 1}`,
@@ -517,19 +548,19 @@ async function continueImport(rawCtx, jobId) {
         current_day_id: currentDayId,
       });
       if (calls >= CHUNK_BUDGET) break;
-    }
-
-    if (isFlightsOnly) {
-      const block = blocks[cursor.blockIndex];
-      calls += await processBlock(ctx, jobId, tripId, section, block, daysByDate, catByName, null, counts, start, end);
+    } else if (cursor.blockIndex === 0 && !needsDay) {
+      // Unplanned (Overview) or flights-only section — no day, process in place.
       currentDayId = null;
-      cursor.blockIndex++;
-      if (cursor.blockIndex >= blocks.length) { cursor.sectionIndex++; cursor.blockIndex = 0; }
-      await persistProgress(ctx, jobId, cursor, counts, currentDayId);
-      continue;
+      const label = String(section.heading || '').trim();
+      await updateJob(ctx, jobId, {
+        current_section: label || 'Unplanned',
+        message: label ? `Importing — ${label} (unplanned)` : 'Importing unplanned items',
+        current_day_id: null,
+      });
     }
 
-    // Normal section: process blocks[blockIndex..]
+    // Normal section: process blocks[blockIndex..] against the resolved day
+    // (currentDayId is null for unplanned/flights-only sections).
     while (cursor.blockIndex < blocks.length && calls < CHUNK_BUDGET) {
       const block = blocks[cursor.blockIndex];
       calls += await processBlock(ctx, jobId, tripId, section, block, daysByDate, catByName, currentDayId, counts, start, end);
